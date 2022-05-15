@@ -168,6 +168,75 @@ void facerec_config(facerec* rec, unsigned long size, double padding, int jitter
 	cls->Config(size,padding,jittering);
 }
 
+
+faceret* facerec_recognize_brg(facerec* rec, const uint8_t* brg_data, int width, int height, int max_faces,int type) {
+	faceret* ret = (faceret*)calloc(1, sizeof(faceret));
+	FaceRec* cls = (FaceRec*)(rec->cls);
+	
+	std::vector<rectangle> rects;
+	std::vector<descriptor> descrs;
+	std::vector<full_object_detection> shapes;
+	matrix<rgb_pixel> img_rgb{height, width};
+
+	try {
+		int x=0;
+		int y=0;
+		int count = width*height*3;
+		for (int i = 0; i < count; i=i+3)
+		{
+			img_rgb(y, x)=rgb_pixel{brg_data[i+2], brg_data[i+1], brg_data[i]};
+			if (x > 0 && x%(width-1) == 0) {
+				x = 0;
+				y++;
+				
+			} else {
+				x++;
+			}
+
+		}
+
+		std::tie(rects, descrs, shapes) = cls->Recognize(img_rgb, max_faces,type);
+	} catch(image_load_error& e) {
+		ret->err_str = strdup(e.what());
+		ret->err_code = IMAGE_LOAD_ERROR;
+		return ret;
+	} catch (std::exception& e) {
+		ret->err_str = strdup(e.what());
+		ret->err_code = UNKNOWN_ERROR;
+		return ret;
+	}
+	ret->num_faces = descrs.size();
+
+	if (ret->num_faces == 0)
+		return ret;
+	ret->rectangles = (long*)malloc(ret->num_faces * RECT_SIZE);
+	for (int i = 0; i < ret->num_faces; i++) {
+		long* dst = ret->rectangles + i * RECT_LEN;
+		dst[0] = rects[i].left();
+		dst[1] = rects[i].top();
+		dst[2] = rects[i].right();
+		dst[3] = rects[i].bottom();
+	}
+	ret->descriptors = (float*)malloc(ret->num_faces * DESCR_SIZE);
+	for (int i = 0; i < ret->num_faces; i++) {
+		void* dst = (uint8_t*)(ret->descriptors) + i * DESCR_SIZE;
+		void* src = (void*)&descrs[i](0,0);
+		memcpy(dst, src, DESCR_SIZE);
+	}
+	ret->num_shapes = shapes[0].num_parts();
+	ret->shapes = (long*)malloc(ret->num_faces * ret->num_shapes * SHAPE_SIZE);
+	for (int i = 0; i < ret->num_faces; i++) {
+		long* dst = ret->shapes + i * ret->num_shapes * SHAPE_LEN;
+		const auto& shape = shapes[i];
+		for (int j = 0; j < ret->num_shapes; j++) {
+			dst[j*SHAPE_LEN] = shape.part(j).x();
+			dst[j*SHAPE_LEN+1] = shape.part(j).y();
+		}
+	}
+	return ret;
+}
+
+
 faceret* facerec_recognize(facerec* rec, const uint8_t* img_data, int len, int max_faces,int type) {
 	faceret* ret = (faceret*)calloc(1, sizeof(faceret));
 	FaceRec* cls = (FaceRec*)(rec->cls);

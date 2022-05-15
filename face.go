@@ -153,6 +153,75 @@ func (rec *Recognizer) recognize(type_ int, imgData []byte, maxFaces int) (faces
 	return
 }
 
+func (rec *Recognizer) recognizeBRG(type_ int, DataBRG []byte, width, height, maxFaces int) (faces []Face, err error) {
+	if len(DataBRG) == 0 {
+		err = ImageLoadError("Empty image")
+		return
+	}
+	if len(DataBRG) != (width * height * 3) {
+		err = ImageLoadError("Incorrect image data size")
+		return
+	}
+
+	if maxFaces > maxFaceLimit {
+		maxFaces = maxFaceLimit
+	}
+	cImgDataBRG := (*C.uint8_t)(&DataBRG[0])
+	cMaxFaces := C.int(maxFaces)
+	cType := C.int(type_)
+	cWidth := C.int(width)
+	cHeight := C.int(height)
+
+	ret := C.facerec_recognize_brg(rec.ptr, cImgDataBRG, cWidth, cHeight, cMaxFaces, cType)
+	defer C.free(unsafe.Pointer(ret))
+
+	if ret.err_str != nil {
+		defer C.free(unsafe.Pointer(ret.err_str))
+		err = makeError(C.GoString(ret.err_str), int(ret.err_code))
+		return
+	}
+
+	numFaces := int(ret.num_faces)
+	if numFaces == 0 {
+		return
+	}
+	numShapes := int(ret.num_shapes)
+
+	// Copy faces data to Go structure.
+	defer C.free(unsafe.Pointer(ret.shapes))
+	defer C.free(unsafe.Pointer(ret.rectangles))
+	defer C.free(unsafe.Pointer(ret.descriptors))
+
+	rDataLen := numFaces * rectLen
+	rDataPtr := unsafe.Pointer(ret.rectangles)
+	rData := (*[maxElements]C.long)(rDataPtr)[:rDataLen:rDataLen]
+
+	dDataLen := numFaces * descrLen
+	dDataPtr := unsafe.Pointer(ret.descriptors)
+	dData := (*[maxElements]float32)(dDataPtr)[:dDataLen:dDataLen]
+
+	sDataLen := numFaces * numShapes * shapeLen
+	sDataPtr := unsafe.Pointer(ret.shapes)
+	sData := (*[maxElements]C.long)(sDataPtr)[:sDataLen:sDataLen]
+
+	for i := 0; i < numFaces; i++ {
+		face := Face{}
+		x0 := int(rData[i*rectLen])
+		y0 := int(rData[i*rectLen+1])
+		x1 := int(rData[i*rectLen+2])
+		y1 := int(rData[i*rectLen+3])
+		face.Rectangle = image.Rect(x0, y0, x1, y1)
+		copy(face.Descriptor[:], dData[i*descrLen:(i+1)*descrLen])
+		for j := 0; j < numShapes; j++ {
+			shapeX := int(sData[(i*numShapes+j)*shapeLen])
+			shapeY := int(sData[(i*numShapes+j)*shapeLen+1])
+			face.Shapes = append(face.Shapes, image.Point{shapeX, shapeY})
+		}
+		faces = append(faces, face)
+	}
+	return
+}
+
 func (rec *Recognizer) recognizeFile(type_ int, imgPath string, maxFaces int) (face []Face, err error) {
 	fd, err := os.Open(imgPath)
 	if err != nil {
@@ -176,6 +245,14 @@ func (rec *Recognizer) Recognize(imgData []byte) (faces []Face, err error) {
 
 func (rec *Recognizer) RecognizeCNN(imgData []byte) (faces []Face, err error) {
 	return rec.recognize(1, imgData, 0)
+}
+
+func (rec *Recognizer) RecognizeBRG(DataBRG []byte, width, height int, modelType ...string) (faces []Face, err error) {
+	model := 0
+	if (len(modelType) > 0) && (modelType[0] == "cnn") {
+		model = 1
+	}
+	return rec.recognizeBRG(model, DataBRG, width, height, 0)
 }
 
 // RecognizeSingle returns face if it's the only face on the image or
