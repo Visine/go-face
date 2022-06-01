@@ -115,6 +115,53 @@ public:
 		return {std::move(rects), std::move(descrs), std::move(shapes)};
 	}
 
+	std::tuple<std::vector<rectangle>>
+	Detect(const matrix<rgb_pixel>& img,int max_faces,int type) {
+		std::vector<rectangle> rects;
+		
+		if(type == 0) {
+			std::lock_guard<std::mutex> lock(detector_mutex_);
+			rects = detector_(img);
+		} else{
+			std::lock_guard<std::mutex> lock(cnn_net_mutex_);
+			auto dets = cnn_net_(img);
+            for (auto&& d : dets) {
+                rects.push_back(d.rect);
+            }
+		}
+
+		// Short circuit.
+		return {std::move(rects)};
+
+	}
+
+	std::tuple<std::vector<rectangle>, std::vector<descriptor>, std::vector<full_object_detection>>
+	RecognizeOnly(const matrix<rgb_pixel>& img,int max_faces, std::vector<rectangle> rects) {
+		std::vector<descriptor> descrs;
+		std::vector<full_object_detection> shapes;
+		if (rects.size() == 0 || (max_faces > 0 && rects.size() > (size_t)max_faces))
+			return {std::move(rects), std::move(descrs), std::move(shapes)};
+
+
+		std::sort(rects.begin(), rects.end());
+
+		for (const auto& rect : rects) {
+			auto shape = sp_(img, rect);
+			shapes.push_back(shape);
+			matrix<rgb_pixel> face_chip;
+			extract_image_chip(img, get_face_chip_details(shape, size, padding), face_chip);
+			std::lock_guard<std::mutex> lock(net_mutex_);
+			if (jittering > 0) {
+				descrs.push_back(mean(mat(net_(jitter_image(std::move(face_chip), jittering)))));
+			} else {
+				descrs.push_back(net_(face_chip));
+			}
+		}
+
+		return {std::move(rects), std::move(descrs), std::move(shapes)};
+	}
+
+
 	void SetSamples(std::vector<descriptor>&& samples, std::vector<int>&& cats) {
 		std::unique_lock<std::shared_mutex> lock(samples_mutex_);
 		samples_ = std::move(samples);
@@ -169,22 +216,33 @@ void facerec_config(facerec* rec, unsigned long size, double padding, int jitter
 }
 
 
-faceret* facerec_recognize_brg(facerec* rec, const uint8_t* brg_data, int width, int height, int max_faces,int type) {
+faceret* facerec_recognize_brg(facerec* rec, const uint8_t* brg_data, int width, int height, int max_faces,int type, int downsample) {
 	faceret* ret = (faceret*)calloc(1, sizeof(faceret));
 	FaceRec* cls = (FaceRec*)(rec->cls);
-	
+	int height_ds, width_ds;
+	height_ds=height/downsample;
+	width_ds=width/downsample;
 	std::vector<rectangle> rects;
 	std::vector<descriptor> descrs;
 	std::vector<full_object_detection> shapes;
 	matrix<rgb_pixel> img_rgb{height, width};
+	matrix<rgb_pixel> img_rgb_ds{height_ds, width_ds};
 
 	try {
 		int x=0;
 		int y=0;
+		int x_ds=0;
+		int y_ds=0;
 		int count = width*height*3;
 		for (int i = 0; i < count; i=i+3)
 		{
+
 			img_rgb(y, x)=rgb_pixel{brg_data[i+2], brg_data[i+1], brg_data[i]};
+			x_ds = x/downsample;
+			y_ds = y/downsample;
+			if (x%downsample == 0 && y%downsample==0 && x_ds < width_ds && y_ds < height_ds) {
+				img_rgb_ds(y_ds,x_ds)=img_rgb(y, x);
+			}
 			if (x > 0 && x%(width-1) == 0) {
 				x = 0;
 				y++;
@@ -195,7 +253,20 @@ faceret* facerec_recognize_brg(facerec* rec, const uint8_t* brg_data, int width,
 
 		}
 
-		std::tie(rects, descrs, shapes) = cls->Recognize(img_rgb, max_faces,type);
+		std::tie(rects) = cls->Detect(img_rgb_ds, max_faces, type);
+		ret->num_faces=rects.size();
+		if (downsample>0 && ret->num_faces>0) {
+			for (int i = 0; i < ret->num_faces; i++)
+			{
+				rects[i].set_left(rects[i].left()*downsample);
+				rects[i].set_top(rects[i].top()*downsample);
+				rects[i].set_right(rects[i].right()*downsample);
+				rects[i].set_bottom(rects[i].bottom()*downsample);
+
+			}
+			
+		}
+		std::tie(rects, descrs, shapes) = cls->RecognizeOnly(img_rgb_ds, max_faces, rects);
 	} catch(image_load_error& e) {
 		ret->err_str = strdup(e.what());
 		ret->err_code = IMAGE_LOAD_ERROR;
@@ -232,6 +303,55 @@ faceret* facerec_recognize_brg(facerec* rec, const uint8_t* brg_data, int width,
 			dst[j*SHAPE_LEN] = shape.part(j).x();
 			dst[j*SHAPE_LEN+1] = shape.part(j).y();
 		}
+	}
+	return ret;
+}
+
+faceret* facerec_detect_brg(facerec* rec, const uint8_t* brg_data, int width, int height, int max_faces,int type) {
+	faceret* ret = (faceret*)calloc(1, sizeof(faceret));
+	FaceRec* cls = (FaceRec*)(rec->cls);
+	
+	std::vector<rectangle> rects;
+	matrix<rgb_pixel> img_rgb{height, width};
+
+	try {
+		int x=0;
+		int y=0;
+		int count = width*height*3;
+		for (int i = 0; i < count; i=i+3)
+		{
+			img_rgb(y, x)=rgb_pixel{brg_data[i+2], brg_data[i+1], brg_data[i]};
+			if (x > 0 && x%(width-1) == 0) {
+				x = 0;
+				y++;
+				
+			} else {
+				x++;
+			}
+
+		}
+
+		std::tie(rects) = cls->Detect(img_rgb, max_faces,type);
+	} catch(image_load_error& e) {
+		ret->err_str = strdup(e.what());
+		ret->err_code = IMAGE_LOAD_ERROR;
+		return ret;
+	} catch (std::exception& e) {
+		ret->err_str = strdup(e.what());
+		ret->err_code = UNKNOWN_ERROR;
+		return ret;
+	}
+	ret->num_faces = rects.size();
+
+	if (ret->num_faces == 0)
+		return ret;
+	ret->rectangles = (long*)malloc(ret->num_faces * RECT_SIZE);
+	for (int i = 0; i < ret->num_faces; i++) {
+		long* dst = ret->rectangles + i * RECT_LEN;
+		dst[0] = rects[i].left();
+		dst[1] = rects[i].top();
+		dst[2] = rects[i].right();
+		dst[3] = rects[i].bottom();
 	}
 	return ret;
 }

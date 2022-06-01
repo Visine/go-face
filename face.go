@@ -153,7 +153,7 @@ func (rec *Recognizer) recognize(type_ int, imgData []byte, maxFaces int) (faces
 	return
 }
 
-func (rec *Recognizer) recognizeBRG(type_ int, DataBRG []byte, width, height, maxFaces int) (faces []Face, err error) {
+func (rec *Recognizer) recognizeBRG(type_ int, DataBRG []byte, width, height, maxFaces, downsample int) (faces []Face, err error) {
 	if len(DataBRG) == 0 {
 		err = ImageLoadError("Empty image")
 		return
@@ -171,8 +171,9 @@ func (rec *Recognizer) recognizeBRG(type_ int, DataBRG []byte, width, height, ma
 	cType := C.int(type_)
 	cWidth := C.int(width)
 	cHeight := C.int(height)
+	cDownSample := C.int(downsample)
 
-	ret := C.facerec_recognize_brg(rec.ptr, cImgDataBRG, cWidth, cHeight, cMaxFaces, cType)
+	ret := C.facerec_recognize_brg(rec.ptr, cImgDataBRG, cWidth, cHeight, cMaxFaces, cType, cDownSample)
 	defer C.free(unsafe.Pointer(ret))
 
 	if ret.err_str != nil {
@@ -222,6 +223,60 @@ func (rec *Recognizer) recognizeBRG(type_ int, DataBRG []byte, width, height, ma
 	return
 }
 
+func (rec *Recognizer) detectBRG(type_ int, DataBRG []byte, width, height, maxFaces int) (faces []Face, err error) {
+	if len(DataBRG) == 0 {
+		err = ImageLoadError("Empty image")
+		return
+	}
+	if len(DataBRG) != (width * height * 3) {
+		err = ImageLoadError("Incorrect image data size")
+		return
+	}
+
+	if maxFaces > maxFaceLimit {
+		maxFaces = maxFaceLimit
+	}
+	cImgDataBRG := (*C.uint8_t)(&DataBRG[0])
+	cMaxFaces := C.int(maxFaces)
+	cType := C.int(type_)
+	cWidth := C.int(width)
+	cHeight := C.int(height)
+
+	ret := C.facerec_detect_brg(rec.ptr, cImgDataBRG, cWidth, cHeight, cMaxFaces, cType)
+	defer C.free(unsafe.Pointer(ret))
+
+	if ret.err_str != nil {
+		defer C.free(unsafe.Pointer(ret.err_str))
+		err = makeError(C.GoString(ret.err_str), int(ret.err_code))
+		return
+	}
+
+	numFaces := int(ret.num_faces)
+	if numFaces == 0 {
+		return
+	}
+
+	// Copy faces data to Go structure.
+	defer C.free(unsafe.Pointer(ret.shapes))
+	defer C.free(unsafe.Pointer(ret.rectangles))
+	defer C.free(unsafe.Pointer(ret.descriptors))
+
+	rDataLen := numFaces * rectLen
+	rDataPtr := unsafe.Pointer(ret.rectangles)
+	rData := (*[maxElements]C.long)(rDataPtr)[:rDataLen:rDataLen]
+
+	for i := 0; i < numFaces; i++ {
+		face := Face{}
+		x0 := int(rData[i*rectLen])
+		y0 := int(rData[i*rectLen+1])
+		x1 := int(rData[i*rectLen+2])
+		y1 := int(rData[i*rectLen+3])
+		face.Rectangle = image.Rect(x0, y0, x1, y1)
+		faces = append(faces, face)
+	}
+	return
+}
+
 func (rec *Recognizer) recognizeFile(type_ int, imgPath string, maxFaces int) (face []Face, err error) {
 	fd, err := os.Open(imgPath)
 	if err != nil {
@@ -247,12 +302,23 @@ func (rec *Recognizer) RecognizeCNN(imgData []byte) (faces []Face, err error) {
 	return rec.recognize(1, imgData, 0)
 }
 
-func (rec *Recognizer) RecognizeBRG(DataBRG []byte, width, height int, modelType ...string) (faces []Face, err error) {
+func (rec *Recognizer) RecognizeBRG(DataBRG []byte, width, height int, modelType string, downsample int) (faces []Face, err error) {
+	model := 0
+	if modelType == "cnn" {
+		model = 1
+	}
+	if downsample < 1 {
+		downsample = 1
+	}
+	return rec.recognizeBRG(model, DataBRG, width, height, 0, downsample)
+}
+
+func (rec *Recognizer) DetectBRG(DataBRG []byte, width, height int, modelType ...string) (faces []Face, err error) {
 	model := 0
 	if (len(modelType) > 0) && (modelType[0] == "cnn") {
 		model = 1
 	}
-	return rec.recognizeBRG(model, DataBRG, width, height, 0)
+	return rec.detectBRG(model, DataBRG, width, height, 0)
 }
 
 // RecognizeSingle returns face if it's the only face on the image or
