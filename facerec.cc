@@ -266,7 +266,7 @@ faceret* facerec_recognize_brg(facerec* rec, const uint8_t* brg_data, int width,
 			}
 			
 		}
-		std::tie(rects, descrs, shapes) = cls->RecognizeOnly(img_rgb_ds, max_faces, rects);
+		std::tie(rects, descrs, shapes) = cls->RecognizeOnly(img_rgb, max_faces, rects);
 	} catch(image_load_error& e) {
 		ret->err_str = strdup(e.what());
 		ret->err_code = IMAGE_LOAD_ERROR;
