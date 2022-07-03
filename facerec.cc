@@ -168,7 +168,7 @@ public:
 		cats_ = std::move(cats);
 	}
 
-	int Classify(const descriptor& test_sample, float tolerance) {
+	std::tuple<int, float>  Classify(const descriptor& test_sample, float tolerance) {
 		std::shared_lock<std::shared_mutex> lock(samples_mutex_);
 		return classify(samples_, cats_, test_sample, tolerance);
 	}
@@ -426,10 +426,12 @@ void facerec_set_samples(
 	cls->SetSamples(std::move(samples), std::move(cats));
 }
 
-int facerec_classify(facerec* rec, const float* c_test_sample, float tolerance) {
+face_class* facerec_classify(facerec* rec, const float* c_test_sample, float tolerance) {
+	face_class* ret = (face_class*)calloc(1, sizeof(face_class));
 	FaceRec* cls = (FaceRec*)(rec->cls);
 	descriptor test_sample = mat(c_test_sample, DESCR_LEN, 1);
-	return cls->Classify(test_sample, tolerance);
+	std::tie(ret->idx, ret->distance) = cls->Classify(test_sample, tolerance);
+	return ret;
 }
 
 void facerec_free(facerec* rec) {

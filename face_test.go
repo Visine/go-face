@@ -72,7 +72,7 @@ func getIdolData() (idata *IdolData, err error) {
 		return
 	}
 	idata.byID = make(map[string]*Idol)
-	for i, _ := range idata.Idols {
+	for i := range idata.Idols {
 		idol := &idata.Idols[i]
 		idata.byID[idol.ID] = idol
 	}
@@ -95,7 +95,7 @@ func getTrainData(idata *IdolData) (tdata *TrainData) {
 	var catID int32
 	var prevIdolID string
 	catID = -1
-	for i, _ := range idata.Faces {
+	for i := range idata.Faces {
 		iface := &idata.Faces[i]
 		descriptor := str2descr(iface.Descriptor)
 		samples = append(samples, descriptor)
@@ -115,16 +115,17 @@ func getTrainData(idata *IdolData) (tdata *TrainData) {
 	return
 }
 
-func recognizeAndClassify(fpath string, tolerance float32) (id int, err error) {
+func recognizeAndClassify(fpath string, tolerance float32) (id int, distance float32, err error) {
 	id = -1
+	distance = 0.0
 	f, err := rec.RecognizeSingleFile(fpath)
 	if err != nil || f == nil {
 		return
 	}
 	if tolerance < 0 {
-		id = rec.Classify(f.Descriptor)
+		id, distance = rec.Classify(f.Descriptor)
 	} else {
-		id = rec.ClassifyThreshold(f.Descriptor, tolerance)
+		id, distance = rec.ClassifyThreshold(f.Descriptor, tolerance)
 	}
 	return
 }
@@ -170,7 +171,7 @@ func TestNumFaces(t *testing.T) {
 
 func TestEmptyClassify(t *testing.T) {
 	var sample face.Descriptor
-	id := rec.Classify(sample)
+	id, _ := rec.Classify(sample)
 	if id >= 0 {
 		t.Fatalf("Shouldn't recognize but got %d category", id)
 	}
@@ -190,7 +191,7 @@ func TestIdols(t *testing.T) {
 			expectedIname := names[0]
 			expectedBname := names[1]
 
-			catID, err := recognizeAndClassify(getTPath(fname), -1)
+			catID, _, err := recognizeAndClassify(getTPath(fname), -1)
 			if err != nil {
 				t.Fatalf("Can't recognize: %v", err)
 			}
@@ -212,14 +213,14 @@ func TestIdols(t *testing.T) {
 }
 
 func TestClassifyThreshold(t *testing.T) {
-	id, err := recognizeAndClassify(getTPath("nana.jpg"), 0.1)
+	id, _, err := recognizeAndClassify(getTPath("nana.jpg"), 0.1)
 	if err != nil {
 		t.Fatalf("Can't recognize: %v", err)
 	}
 	if id >= 0 {
 		t.Fatalf("Shouldn't recognize but got %d category", id)
 	}
-	id, err = recognizeAndClassify(getTPath("nana.jpg"), 0.8)
+	id, _, err = recognizeAndClassify(getTPath("nana.jpg"), 0.8)
 	if err != nil {
 		t.Fatalf("Can't recognize: %v", err)
 	}

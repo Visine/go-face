@@ -2,21 +2,26 @@
 #include <dlib/graph_utils.h>
 #include "classify.h"
 
-int classify(
+std::tuple<int, float> classify(
 	const std::vector<descriptor>& samples,
 	const std::vector<int>& cats,
 	const descriptor& test_sample,
 	float tolerance
 ) {
+	float minDistance=-0.1;
 	if (samples.size() == 0)
-		return -1;
+		return {-1, minDistance};
 
 	std::vector<std::pair<int, float>> distances;
 	distances.reserve(samples.size());
-	auto dist_func = dlib::squared_euclidean_distance();
+	// auto dist_func = dlib::squared_euclidean_distance();
 	int idx = 0;
 	for (const auto& sample : samples) {
-		float dist = dist_func(sample, test_sample);
+		// float dist = dist_func(sample, test_sample);
+		float dist = length(sample-test_sample);
+		if (dist<minDistance || minDistance<0) {
+			minDistance=dist;
+		}
 		if (tolerance < 0 || dist <= tolerance) {
 			distances.push_back({cats[idx], dist});
 		}
@@ -24,7 +29,7 @@ int classify(
 	}
 
 	if (distances.size() == 0)
-		return -1;
+		return {-1, minDistance};
 
 	std::sort(
 		distances.begin(), distances.end(),
@@ -55,5 +60,6 @@ int classify(
 			return hits1 < hits2;
 		}
 	);
-	return hit->first;
+	auto tmp = hit->second;
+	return {hit->first, tmp.second};
 }

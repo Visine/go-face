@@ -61,7 +61,7 @@ func Example_basic() {
 	if nayoungFace == nil {
 		log.Fatalf("Not a single face on the image")
 	}
-	catID := rec.Classify(nayoungFace.Descriptor)
+	catID, _ := rec.Classify(nayoungFace.Descriptor)
 	if catID < 0 {
 		log.Fatalf("Can't classify")
 	}

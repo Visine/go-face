@@ -383,17 +383,19 @@ func (rec *Recognizer) SetSamples(samples []Descriptor, cats []int32) {
 
 // Classify returns class ID for the given descriptor. Negative index is
 // returned if no match. Thread-safe.
-func (rec *Recognizer) Classify(testSample Descriptor) int {
+func (rec *Recognizer) Classify(testSample Descriptor) (int, float32) {
 	cTestSample := (*C.float)(unsafe.Pointer(&testSample))
-	return int(C.facerec_classify(rec.ptr, cTestSample, -1))
+	res := C.facerec_classify(rec.ptr, cTestSample, -1)
+	return int(res.idx), float32(res.distance)
 }
 
 // Same as Classify but allows to specify max distance between faces to
 // consider it a match. Start with 0.6 if not sure.
-func (rec *Recognizer) ClassifyThreshold(testSample Descriptor, tolerance float32) int {
+func (rec *Recognizer) ClassifyThreshold(testSample Descriptor, tolerance float32) (int, float32) {
 	cTestSample := (*C.float)(unsafe.Pointer(&testSample))
 	cTolerance := C.float(tolerance)
-	return int(C.facerec_classify(rec.ptr, cTestSample, cTolerance))
+	res := C.facerec_classify(rec.ptr, cTestSample, cTolerance)
+	return int(res.idx), float32(res.distance)
 }
 
 // Close frees resources taken by the Recognizer. Safe to call multiple
